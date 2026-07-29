@@ -231,13 +231,13 @@ fn advance_math_scanner(
             closers.push(MathCloser::Brackets);
             return Some(cursor + 2);
         }
-        if source[cursor..].starts_with(r"\begin{")
-            && !is_escaped(source, cursor)
-            && let Some((environment, opener_end)) = parse_environment(source, cursor)
-            && is_display_environment(environment)
-        {
-            closers.push(MathCloser::Environment(environment.to_owned()));
-            return Some(opener_end);
+        if source[cursor..].starts_with(r"\begin{") && !is_escaped(source, cursor) {
+            if let Some((environment, opener_end)) = parse_environment(source, cursor) {
+                if is_display_environment(environment) {
+                    closers.push(MathCloser::Environment(environment.to_owned()));
+                    return Some(opener_end);
+                }
+            }
         }
         return None;
     }
@@ -257,22 +257,22 @@ fn advance_math_scanner(
         closers.clear();
         return Some(cursor + 2);
     }
-    if source[cursor..].starts_with(r"\begin{")
-        && !is_escaped(source, cursor)
-        && let Some((environment, opener_end)) = parse_environment(source, cursor)
-    {
-        closers.push(MathCloser::Environment(environment.to_owned()));
-        return Some(opener_end);
+    if source[cursor..].starts_with(r"\begin{") && !is_escaped(source, cursor) {
+        if let Some((environment, opener_end)) = parse_environment(source, cursor) {
+            closers.push(MathCloser::Environment(environment.to_owned()));
+            return Some(opener_end);
+        }
     }
-    if source[cursor..].starts_with(r"\end{")
-        && !is_escaped(source, cursor)
-        && let Some((environment, closer_end)) = parse_end_environment(source, cursor)
-        && closers
-            .last()
-            .is_some_and(|closer| closer.closes_environment(environment))
-    {
-        let _ = closers.pop();
-        return Some(closer_end);
+    if source[cursor..].starts_with(r"\end{") && !is_escaped(source, cursor) {
+        if let Some((environment, closer_end)) = parse_end_environment(source, cursor) {
+            if closers
+                .last()
+                .is_some_and(|closer| closer.closes_environment(environment))
+            {
+                let _ = closers.pop();
+                return Some(closer_end);
+            }
+        }
     }
     if source[cursor..].starts_with(r"\left")
         && command_ends_at(source, cursor + r"\left".len())

@@ -9,7 +9,7 @@
 [![Docs.rs](https://img.shields.io/docsrs/ratatex)][docs]
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)][license]
 
-**[Try it](#try-it)** · **[Embed it](#embed-it)** ·
+**[Nanocodex demo](#nanocodex-demo)** · **[Try it](#try-it)** · **[Embed it](#embed-it)** ·
 **[Streaming](#streaming-markdown)** · **[Selection](#copyable-latex)** ·
 **[Scrolling](#scrolling-and-clipping)**
 
@@ -18,6 +18,20 @@
 [docs]: https://docs.rs/ratatex
 [license]: LICENSE
 
+</div>
+
+<a id="nanocodex-demo"></a>
+<div align="center">
+  <a href="https://github.com/gakonst/nanocodex">
+    <img src="assets/nanocodex-latex-stress.gif" alt="Nanocodex rendering a LaTeX stress test with Ratatex">
+  </a>
+  <p>
+    <sub>
+      Ratatex rendering a LaTeX stress test inside
+      <a href="https://github.com/gakonst/nanocodex"><strong>Nanocodex</strong></a>,
+      building blocks for frontier OpenAI agents.
+    </sub>
+  </p>
 </div>
 
 Ratatex turns Markdown display math into cell-aligned PNGs on bounded

@@ -21,18 +21,11 @@
 </div>
 
 <a id="nanocodex-demo"></a>
-<div align="center">
-  <a href="assets/nanocodex-latex-stress.mp4">
-    <img src="assets/nanocodex-latex-stress.png" alt="A live Nanocodex agent session rendering and copying a LaTeX stress test with Ratatex">
-  </a>
-  <p>
-    <sub>
-      A live <a href="https://github.com/gakonst/nanocodex"><strong>Nanocodex</strong></a>
-      low-reasoning run: render TeX, click back to source, and drag-copy the original LaTeX.
-      Click the preview to watch the MP4.
-    </sub>
-  </p>
-</div>
+
+https://github.com/user-attachments/assets/9012dcc3-b7d2-44d0-acdf-c94cc73ed5f7
+
+A live [**Nanocodex**](https://github.com/gakonst/nanocodex) low-reasoning run:
+render TeX, click back to source, and drag-copy the original LaTeX.
 
 Ratatex turns Markdown display math into cell-aligned PNGs on bounded
 background workers:

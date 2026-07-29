@@ -23,13 +23,12 @@
 <a id="nanocodex-demo"></a>
 <div align="center">
   <a href="https://github.com/gakonst/nanocodex">
-    <img src="assets/nanocodex-latex-stress.gif" alt="Nanocodex rendering a LaTeX stress test with Ratatex">
+    <img src="assets/nanocodex-latex-stress.gif" alt="A live Nanocodex agent session rendering a LaTeX stress test with Ratatex">
   </a>
   <p>
     <sub>
-      Ratatex rendering a LaTeX stress test inside
-      <a href="https://github.com/gakonst/nanocodex"><strong>Nanocodex</strong></a>,
-      building blocks for frontier OpenAI agents.
+      A live <a href="https://github.com/gakonst/nanocodex"><strong>Nanocodex</strong></a>
+      agent run, from the <code>nanocodex</code> shell command to a Ratatex-rendered response.
     </sub>
   </p>
 </div>

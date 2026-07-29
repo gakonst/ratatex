@@ -22,13 +22,14 @@
 
 <a id="nanocodex-demo"></a>
 <div align="center">
-  <a href="https://github.com/gakonst/nanocodex">
-    <img src="assets/nanocodex-latex-stress.gif" alt="A live Nanocodex agent session rendering a LaTeX stress test with Ratatex">
+  <a href="assets/nanocodex-latex-stress.mp4">
+    <img src="assets/nanocodex-latex-stress.png" alt="A live Nanocodex agent session rendering and copying a LaTeX stress test with Ratatex">
   </a>
   <p>
     <sub>
       A live <a href="https://github.com/gakonst/nanocodex"><strong>Nanocodex</strong></a>
-      agent run, from the <code>nanocodex</code> shell command to a Ratatex-rendered response.
+      low-reasoning run: render TeX, click back to source, and drag-copy the original LaTeX.
+      Click the preview to watch the MP4.
     </sub>
   </p>
 </div>

@@ -1,7 +1,2 @@
 /target
 .env
-*.dvi
-*.aux
-*.log
-*.png
-*.tex

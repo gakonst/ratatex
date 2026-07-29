@@ -1,12 +1,12 @@
 //! TeX-quality display math inside scrolling Ratatui interfaces.
 //!
 //! `ratatex` turns completed Markdown display-math regions into cell-aligned
-//! PNGs on a bounded background worker. Its normal path parses, lays out, and
-//! rasterizes math in-process with embedded fonts; `latex` and `dvipng` are an
-//! optional compatibility fallback. The PNGs are cached on disk, uploaded
-//! through the Kitty graphics protocol, and placed with Unicode-placeholder
-//! cells. Because the placeholders are ordinary terminal cells, equations
-//! naturally scroll, clip, and redraw with the rest of a Ratatui buffer.
+//! PNGs on a bounded background worker. It parses, lays out, and rasterizes math
+//! in-process with embedded fonts—without a system TeX installation or
+//! rendering subprocess. The PNGs are cached on disk, uploaded through the
+//! Kitty graphics protocol, and placed with Unicode-placeholder cells. Because
+//! the placeholders are ordinary terminal cells, equations naturally scroll,
+//! clip, and redraw with the rest of a Ratatui buffer.
 //!
 //! The crate deliberately leaves surrounding Markdown rendering to the
 //! application. Use [`display_math`] to find renderable regions, call

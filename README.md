@@ -32,11 +32,11 @@ Markdown display math
     → Kitty virtual placement + Unicode-placeholder cells
 ```
 
-The normal path uses the open-source [RaTeX](https://github.com/erweixin/RaTeX)
-parser, layout engine, embedded fonts, and rasterizer entirely in-process. It
-does not start a subprocess. If the built-in renderer rejects an expression,
-`ratatex` can optionally fall back to `latex` → DVI → `dvipng` for broader
-package compatibility.
+Rendering uses the open-source [RaTeX](https://github.com/erweixin/RaTeX)
+parser, layout engine, embedded fonts, and rasterizer entirely in-process.
+Ratatex never invokes a system TeX installation, writes DVI, or starts a
+rendering subprocess. Unsupported expressions return a typed failure so the
+host application can keep its text representation.
 
 The placeholder cells live in the normal Ratatui buffer. Equations therefore
 scroll and clip with the surrounding text instead of behaving like
@@ -52,6 +52,7 @@ cargo add ratatex
 
 - A terminal implementing Kitty graphics Unicode placeholders.
 - Ratatui 0.29.
+- No TeX distribution or external rendering programs.
 
 Ghostty, Kitty, WezTerm, and recent Konsole releases implement the graphics
 protocol. When running inside tmux, enable graphics passthrough:
@@ -60,24 +61,12 @@ protocol. When running inside tmux, enable graphics passthrough:
 set -g allow-passthrough on
 ```
 
-`latex` and `dvipng` are optional compatibility fallbacks. The in-process
-renderer covers common KaTeX/AMS math without either program. MacTeX's standard
-`/Library/TeX/texbin` location is discovered automatically when the fallback is
-installed.
-
 ## Try it
 
 From a compatible terminal:
 
 ```sh
 cargo run --example demo
-```
-
-To also enable the optional external-TeX fallback with Nix:
-
-```sh
-nix shell nixpkgs#texliveSmall nixpkgs#texlivePackages.dvipng \
-  -c cargo run --example demo
 ```
 
 Press `q`, `Esc`, or `Ctrl-C` to leave the demo.
@@ -122,10 +111,9 @@ for command in renderer.drain_terminal_commands() {
 # Ok::<(), std::io::Error>(())
 ```
 
-`request()` is non-blocking. A cache miss returns `Pending`, renders on a
-worker, and invokes `on_update` when the result is ready. The normal path does
-not wait for a subprocess; subsequent runs can load the content-addressed PNG
-directly from disk.
+`request()` is non-blocking. A cache miss returns `Pending`, renders in-process
+on a worker, and invokes `on_update` when the result is ready. Subsequent runs
+can load the content-addressed PNG directly from disk.
 
 When the callback wakes your event loop:
 
@@ -234,11 +222,10 @@ foreground. It works across terminal themes without guessing the background.
 `ColorScheme` and `Antialiasing::{LcdRgb,LcdBgr}` provide LCD subpixel
 rendering when the application knows the exact background color.
 
-TeX input, decoded images, queues, and caches are bounded, and common unsafe
-primitives are rejected before either backend runs. The optional external
-fallback disables shell escape, restricts file I/O, and kills subprocess groups
-on timeout. Run untrusted rendering in an OS sandbox when it requires a hard
-security boundary.
+TeX input, decoded images, queues, and caches are bounded, and unsupported or
+unsafe primitives are rejected before layout. Formula input is parsed as math;
+it is never passed to a shell or external TeX process. Run untrusted rendering
+in an OS sandbox when it requires a hard security boundary.
 
 ## Scope
 
@@ -246,6 +233,10 @@ Ratatex renders display math. It does not own your Markdown parser, transcript
 model, scrolling state, input loop, or clipboard. The API is deliberately a
 small composable layer: detection and streaming healing, an asynchronous
 renderer/cache, terminal commands, and a clipping Ratatui widget.
+
+The supported formula language is the KaTeX/AMS-style subset implemented by
+RaTeX. Ratatex intentionally does not load arbitrary TeX packages or fall back
+to a system TeX toolchain.
 
 ## License
 

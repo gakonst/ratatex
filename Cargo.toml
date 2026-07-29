@@ -33,10 +33,6 @@ sha2 = "0.10.9"
 tempfile = "3.20.0"
 thiserror = "2.0.12"
 tracing = "0.1.41"
-wait-timeout = "0.2.1"
-
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.31.3", default-features = false, features = ["process", "signal"] }
 
 [dev-dependencies]
 color-eyre = "0.6.5"
@@ -56,7 +52,7 @@ pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 
-# The demo is normally launched with `cargo run`, so keep the native math
+# The demo is normally launched with `cargo run`, so keep the math
 # pipeline optimized even in a debuggable build.
 [profile.dev]
 opt-level = 1

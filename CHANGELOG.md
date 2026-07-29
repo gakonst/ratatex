@@ -10,7 +10,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 
 - In-process TeX parsing, layout, embedded fonts, and supersampled PNG
-  rasterization through RaTeX.
+  rasterization through RaTeX, with no system TeX toolchain or subprocess.
 - Asynchronous bounded rendering with memory and content-addressed disk caches.
 - Kitty graphics uploads, virtual placements, and Unicode-placeholder Ratatui
   cells with tmux passthrough.
@@ -19,6 +19,5 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   close.
 - Signed clipping that preserves Kitty tile coordinates while formulas scroll.
 - Compact LaTeX source fallback for native terminal selection and copying.
-- Optional sandboxed `latex` → DVI → `dvipng` compatibility fallback.
 
 [0.1.0]: https://github.com/gakonst/ratatex/releases/tag/v0.1.0

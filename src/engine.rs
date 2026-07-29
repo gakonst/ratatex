@@ -1,9 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
-    ffi::{OsStr, OsString},
     fmt, io,
     path::PathBuf,
-    process::{Command, Stdio},
     sync::{
         Arc, Mutex, PoisonError,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -26,22 +24,10 @@ use crate::{
 /// Why a formula could not be rendered.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RenderFailureKind {
-    /// The built-in pure-Rust math parser or rasterizer rejected the formula.
-    Native,
+    /// The in-process `RaTeX` parser, layout engine, or rasterizer rejected the formula.
+    Ratex,
     /// TeX source exceeded a bound or used a denied primitive.
     UnsafeSource,
-    /// A requested external compatibility renderer is unavailable.
-    MissingProgram,
-    /// An external program could not be started.
-    Spawn,
-    /// An external program exceeded its deadline.
-    Timeout,
-    /// `latex` rejected the expression.
-    Latex,
-    /// `dvipng` rejected the generated DVI.
-    Dvipng,
-    /// A filesystem operation failed.
-    Io,
     /// A PNG was malformed or exceeded a configured bound.
     InvalidPng,
     /// The bounded background queue was temporarily full.
@@ -82,10 +68,6 @@ impl RenderFailure {
 pub struct Availability {
     /// Kitty Unicode placeholders are available.
     pub graphics: bool,
-    /// The configured `latex` executable was found.
-    pub latex: bool,
-    /// The configured `dvipng` executable was found.
-    pub dvipng: bool,
 }
 
 impl Availability {
@@ -257,8 +239,6 @@ pub struct RatatexBuilder {
     padding: PixelPadding,
     dpi: u16,
     cache_dir: PathBuf,
-    latex: OsString,
-    dvipng: OsString,
     limits: Limits,
     wake: Wake,
 }
@@ -273,8 +253,6 @@ impl RatatexBuilder {
             padding: PixelPadding::default(),
             dpi: 180,
             cache_dir: default_cache_dir(),
-            latex: OsString::from("latex"),
-            dvipng: OsString::from("dvipng"),
             limits: Limits::default(),
             wake: Arc::new(|| {}),
         }
@@ -310,18 +288,6 @@ impl RatatexBuilder {
         self
     }
 
-    /// Sets the optional compatibility-fallback `latex` executable.
-    pub fn latex_command(mut self, command: impl Into<OsString>) -> Self {
-        self.latex = command.into();
-        self
-    }
-
-    /// Sets the optional compatibility-fallback `dvipng` executable.
-    pub fn dvipng_command(mut self, command: impl Into<OsString>) -> Self {
-        self.dvipng = command.into();
-        self
-    }
-
     /// Replaces all resource bounds.
     pub fn limits(mut self, limits: Limits) -> Self {
         self.limits = limits;
@@ -342,14 +308,8 @@ impl RatatexBuilder {
     /// created.
     pub fn build(self) -> io::Result<Ratatex> {
         let limits = normalized_limits(self.limits);
-        let latex = resolve_program(self.latex);
-        let dvipng = resolve_program(self.dvipng);
-        let latex_available = program_is_available(&latex);
-        let dvipng_available = program_is_available(&dvipng);
         let availability = Availability {
             graphics: self.terminal.graphics == GraphicsSupport::Kitty,
-            latex: latex_available,
-            dvipng: dvipng_available,
         };
         let config = Arc::new(EngineConfig {
             terminal: self.terminal,
@@ -358,10 +318,6 @@ impl RatatexBuilder {
             padding: self.padding,
             dpi: self.dpi.clamp(72, 600),
             cache_dir: self.cache_dir,
-            latex,
-            dvipng,
-            latex_available,
-            dvipng_available,
             limits,
             wake: self.wake,
         });
@@ -798,32 +754,7 @@ fn normalized_limits(mut limits: Limits) -> Limits {
     limits.max_disk_entries = limits.max_disk_entries.max(1);
     limits.request_queue = limits.request_queue.max(1);
     limits.workers = limits.workers.clamp(1, 8);
-    limits.program_timeout = limits.program_timeout.max(Duration::from_millis(100));
     limits
-}
-
-fn program_is_available(program: &OsStr) -> bool {
-    Command::new(program)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-fn resolve_program(program: OsString) -> OsString {
-    if program_is_available(&program) {
-        return program;
-    }
-    #[cfg(target_os = "macos")]
-    if matches!(program.to_str(), Some("latex" | "dvipng")) {
-        let candidate = PathBuf::from("/Library/TeX/texbin").join(&program);
-        if program_is_available(candidate.as_os_str()) {
-            return candidate.into_os_string();
-        }
-    }
-    program
 }
 
 #[cfg(test)]
@@ -876,12 +807,10 @@ mod tests {
     }
 
     #[test]
-    fn native_renderer_works_without_external_programs() {
+    fn in_process_renderer_completes_background_work() {
         let (wake_tx, wake_rx) = crossbeam_channel::bounded(1);
         let cache = tempfile::tempdir().unwrap();
         let renderer = Ratatex::builder(TerminalProfile::kitty(PixelSize::default(), false))
-            .latex_command("definitely-not-ratatex-latex")
-            .dvipng_command("definitely-not-ratatex-dvipng")
             .cache_dir(cache.path())
             .on_update(move || {
                 let _ = wake_tx.try_send(());
@@ -892,13 +821,11 @@ mod tests {
         wake_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(matches!(renderer.request("x", 20), FormulaState::Ready(_)));
         assert!(renderer.availability().fully_available());
-        assert!(!renderer.availability().latex);
-        assert!(!renderer.availability().dvipng);
         renderer.shutdown();
     }
 
     #[test]
-    fn common_display_math_renders_cold_without_subprocesses() {
+    fn common_display_math_renders_cold_in_process() {
         let formulas = [
             r"\rho\left(\frac{\partial \mathbf{u}}{\partial t}
                 +(\mathbf{u}\cdot\nabla)\mathbf{u}\right)
@@ -911,8 +838,6 @@ mod tests {
         let (wake_tx, wake_rx) = crossbeam_channel::bounded(formulas.len());
         let cache = tempfile::tempdir().unwrap();
         let renderer = Ratatex::builder(TerminalProfile::kitty(PixelSize::default(), false))
-            .latex_command("missing-latex-for-native-render")
-            .dvipng_command("missing-dvipng-for-native-render")
             .cache_dir(cache.path())
             .on_update(move || {
                 let _ = wake_tx.try_send(());
@@ -934,12 +859,12 @@ mod tests {
             let state = renderer.request(source, 120);
             assert!(
                 matches!(state, FormulaState::Ready(_)),
-                "native renderer did not support {source:?}: {state:?}"
+                "in-process renderer did not support {source:?}: {state:?}"
             );
         }
         assert!(
             started.elapsed() < Duration::from_secs(1),
-            "cold native rendering regressed to subprocess-scale latency"
+            "cold in-process rendering regressed to subprocess-scale latency"
         );
         renderer.shutdown();
     }
@@ -969,8 +894,6 @@ mod tests {
         let (wake_tx, wake_rx) = crossbeam_channel::bounded(formulas.len());
         let cache = tempfile::tempdir().unwrap();
         let renderer = Ratatex::builder(TerminalProfile::kitty(PixelSize::new(10, 20), false))
-            .latex_command("missing-latex-for-compact-row-test")
-            .dvipng_command("missing-dvipng-for-compact-row-test")
             .cache_dir(cache.path())
             .on_update(move || {
                 let _ = wake_tx.try_send(());
@@ -1040,8 +963,6 @@ mod tests {
         let (wake_tx, wake_rx) = crossbeam_channel::bounded(formulas.len());
         let cache = tempfile::tempdir().unwrap();
         let renderer = Ratatex::builder(TerminalProfile::kitty(PixelSize::new(14, 27), false))
-            .latex_command("missing-latex-for-retained-formula-test")
-            .dvipng_command("missing-dvipng-for-retained-formula-test")
             .cache_dir(cache.path())
             .on_update(move || {
                 let _ = wake_tx.try_send(());
@@ -1071,15 +992,13 @@ mod tests {
     }
 
     #[test]
-    fn native_pipeline_renders_navier_stokes_and_reuses_disk_cache() {
+    fn in_process_pipeline_renders_navier_stokes_and_reuses_disk_cache() {
         let source = r"\rho\left(\frac{\partial \mathbf{u}}{\partial t}
             +(\mathbf{u}\cdot\nabla)\mathbf{u}\right)
             =-\nabla p+\mu\nabla^2\mathbf{u}+\rho\mathbf{f}";
         let cache = tempfile::tempdir().unwrap();
         let (wake_tx, wake_rx) = crossbeam_channel::bounded(2);
         let renderer = Ratatex::builder(TerminalProfile::kitty(PixelSize::new(10, 20), false))
-            .latex_command("missing-latex-for-native-render")
-            .dvipng_command("missing-dvipng-for-native-render")
             .cache_dir(cache.path())
             .on_update(move || {
                 let _ = wake_tx.try_send(());
@@ -1110,8 +1029,6 @@ mod tests {
 
         let (cached_tx, cached_rx) = crossbeam_channel::bounded(1);
         let cached = Ratatex::builder(TerminalProfile::kitty(PixelSize::new(10, 20), false))
-            .latex_command("missing-latex-after-cache-fill")
-            .dvipng_command("missing-dvipng-after-cache-fill")
             .cache_dir(cache.path())
             .on_update(move || {
                 let _ = cached_tx.try_send(());

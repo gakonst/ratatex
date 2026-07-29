@@ -1,9 +1,8 @@
 use std::{
     ffi::OsStr,
-    fs::{self, File},
-    io::{Cursor, Read, Write},
+    fs,
+    io::{Cursor, Write},
     path::Path,
-    process::{Child, Command, ExitStatus, Stdio},
     time::SystemTime,
 };
 
@@ -11,19 +10,13 @@ use image::{
     DynamicImage, GenericImage, GrayImage, ImageFormat, ImageReader, Luma, Rgba, RgbaImage,
     imageops::{self, FilterType},
 };
-#[cfg(unix)]
-use nix::{
-    sys::signal::{Signal, killpg},
-    unistd::Pid,
-};
 use ratex_layout::{LayoutOptions, layout, to_display_list};
 use ratex_parser::parser::parse;
 use ratex_render::{RenderOptions, render_to_png};
 use ratex_types::color::Color as RatexColor;
 use sha2::{Digest, Sha256};
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::NamedTempFile;
 use tracing::debug;
-use wait_timeout::ChildExt;
 
 use crate::{
     Antialiasing, ColorScheme, Limits, PixelPadding, PixelSize, Rgb,
@@ -31,9 +24,8 @@ use crate::{
     engine::{CacheKey, RenderFailure, RenderFailureKind},
 };
 
-const CACHE_VERSION: &[u8] = b"ratatex-native-ratex-v2-tight-alpha";
+const CACHE_VERSION: &[u8] = b"ratatex-ratex-v3-in-process-only";
 const SUPERSAMPLE: u16 = 3;
-const MAX_DIAGNOSTIC_BYTES: u64 = 16 * 1024;
 const DENIED_COMMANDS: [&str; 30] = [
     "catcode",
     "closein",
@@ -163,17 +155,7 @@ pub(crate) fn render(
     if let Some(rendered) = load_cached(config, &cache_path) {
         return Ok(rendered);
     }
-    let raw = match native_to_png(config, source) {
-        Ok(raw) => raw,
-        Err(native_failure) if config.latex_available && config.dvipng_available => {
-            debug!(
-                error = %native_failure,
-                "built-in math renderer rejected formula; falling back to latex"
-            );
-            latex_to_png(config, source)?
-        }
-        Err(native_failure) => return Err(native_failure),
-    };
+    let raw = ratex_to_png(config, source)?;
     let rendered = postprocess(
         &raw,
         config.terminal.cell,
@@ -193,19 +175,18 @@ pub(crate) fn render(
     Ok(rendered)
 }
 
-fn native_to_png(config: &EngineConfig, source: &str) -> Result<Vec<u8>, RenderFailure> {
+fn ratex_to_png(config: &EngineConfig, source: &str) -> Result<Vec<u8>, RenderFailure> {
     let ast = parse(source).map_err(|error| {
         RenderFailure::new(
-            RenderFailureKind::Native,
-            format!("built-in math parser rejected the formula: {error}"),
+            RenderFailureKind::Ratex,
+            format!("RaTeX parser rejected the formula: {error}"),
         )
     })?;
     let layout_options = LayoutOptions::default().with_color(RatexColor::WHITE);
     let layout_box = layout(&ast, &layout_options);
     let display_list = to_display_list(&layout_box);
     let render_options = RenderOptions {
-        // A 12pt TeX em at the configured DPI, rasterized at the same 3×
-        // supersampling scale used by the legacy dvipng path.
+        // A 12pt TeX em at the configured DPI, rasterized at 3× resolution.
         font_size: f32::from(config.dpi) / 2.0,
         padding: 0.0,
         background_color: RatexColor::new(0.0, 0.0, 0.0, 0.0),
@@ -214,8 +195,8 @@ fn native_to_png(config: &EngineConfig, source: &str) -> Result<Vec<u8>, RenderF
     };
     render_to_png(&display_list, &render_options).map_err(|error| {
         RenderFailure::new(
-            RenderFailureKind::Native,
-            format!("built-in math rasterizer failed: {error}"),
+            RenderFailureKind::Ratex,
+            format!("RaTeX rasterizer failed: {error}"),
         )
     })
 }
@@ -296,257 +277,6 @@ fn prune_disk_cache(directory: &Path, keep: &Path, max_entries: usize) {
     for (_, path) in pngs.into_iter().take(remove) {
         let _ = fs::remove_file(path);
     }
-}
-
-fn latex_to_png(config: &EngineConfig, source: &str) -> Result<Vec<u8>, RenderFailure> {
-    let directory = TempDir::new().map_err(|error| {
-        RenderFailure::new(
-            RenderFailureKind::Io,
-            format!("failed to create a temporary TeX directory: {error}"),
-        )
-    })?;
-    let tex_path = directory.path().join("formula.tex");
-    fs::write(&tex_path, latex_document(source)).map_err(|error| {
-        RenderFailure::new(
-            RenderFailureKind::Io,
-            format!("failed to write {}: {error}", tex_path.display()),
-        )
-    })?;
-
-    let mut latex = Command::new(&config.latex);
-    latex.args([
-        OsStr::new("-no-shell-escape"),
-        OsStr::new("-interaction=nonstopmode"),
-        OsStr::new("-halt-on-error"),
-        OsStr::new("-file-line-error"),
-        OsStr::new("formula.tex"),
-    ]);
-    configure_program(&mut latex, directory.path());
-    run_program(
-        &mut latex,
-        directory.path(),
-        ProgramKind::Latex,
-        config.limits.program_timeout,
-    )?;
-
-    let output_path = directory.path().join("formula.png");
-    let supersampled_dpi = config.dpi.saturating_mul(SUPERSAMPLE);
-    let mut dvipng = Command::new(&config.dvipng);
-    dvipng
-        .args([OsStr::new("-q"), OsStr::new("-D")])
-        .arg(supersampled_dpi.to_string())
-        .args([
-            OsStr::new("-T"),
-            OsStr::new("tight"),
-            OsStr::new("-bg"),
-            OsStr::new("Transparent"),
-            OsStr::new("-fg"),
-            OsStr::new("rgb 1.0 1.0 1.0"),
-            OsStr::new("-o"),
-            output_path.as_os_str(),
-            OsStr::new("formula.dvi"),
-        ]);
-    configure_program(&mut dvipng, directory.path());
-    run_program(
-        &mut dvipng,
-        directory.path(),
-        ProgramKind::Dvipng,
-        config.limits.program_timeout,
-    )?;
-
-    let metadata = fs::metadata(&output_path).map_err(|error| {
-        RenderFailure::new(
-            RenderFailureKind::Io,
-            format!("failed to inspect {}: {error}", output_path.display()),
-        )
-    })?;
-    if usize::try_from(metadata.len()).unwrap_or(usize::MAX) > config.limits.max_png_bytes {
-        return Err(RenderFailure::new(
-            RenderFailureKind::InvalidPng,
-            "dvipng output exceeded the configured byte limit",
-        ));
-    }
-    fs::read(&output_path).map_err(|error| {
-        RenderFailure::new(
-            RenderFailureKind::Io,
-            format!("failed to read {}: {error}", output_path.display()),
-        )
-    })
-}
-
-fn configure_program(command: &mut Command, directory: &Path) {
-    command
-        .current_dir(directory)
-        .env("openin_any", "p")
-        .env("openout_any", "p")
-        .env("shell_escape", "f")
-        .env_remove("BIBINPUTS")
-        .env_remove("BSTINPUTS")
-        .env_remove("TEXINPUTS")
-        .stdin(Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-}
-
-#[derive(Clone, Copy)]
-enum ProgramKind {
-    Latex,
-    Dvipng,
-}
-
-impl ProgramKind {
-    const fn failure_kind(self) -> RenderFailureKind {
-        match self {
-            Self::Latex => RenderFailureKind::Latex,
-            Self::Dvipng => RenderFailureKind::Dvipng,
-        }
-    }
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Latex => "latex",
-            Self::Dvipng => "dvipng",
-        }
-    }
-}
-
-fn run_program(
-    command: &mut Command,
-    directory: &Path,
-    kind: ProgramKind,
-    timeout: std::time::Duration,
-) -> Result<(), RenderFailure> {
-    let stdout_path = directory.join(format!("{}.stdout", kind.label()));
-    let stderr_path = directory.join(format!("{}.stderr", kind.label()));
-    let stdout = File::create(&stdout_path).map_err(|error| {
-        RenderFailure::new(
-            RenderFailureKind::Io,
-            format!("failed to create {}: {error}", stdout_path.display()),
-        )
-    })?;
-    let stderr = File::create(&stderr_path).map_err(|error| {
-        RenderFailure::new(
-            RenderFailureKind::Io,
-            format!("failed to create {}: {error}", stderr_path.display()),
-        )
-    })?;
-    command
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
-    let program = command.get_program().to_string_lossy().into_owned();
-    let mut child = command.spawn().map_err(|error| {
-        RenderFailure::new(
-            RenderFailureKind::Spawn,
-            format!("failed to start {program}: {error}"),
-        )
-    })?;
-    let status = child.wait_timeout(timeout).map_err(|error| {
-        RenderFailure::new(
-            RenderFailureKind::Io,
-            format!("failed while waiting for {program}: {error}"),
-        )
-    })?;
-    let Some(status) = status else {
-        terminate_process_tree(&mut child);
-        return Err(RenderFailure::new(
-            RenderFailureKind::Timeout,
-            format!("{program} exceeded its {} ms deadline", timeout.as_millis()),
-        ));
-    };
-    if status.success() {
-        return Ok(());
-    }
-    let diagnostic = program_diagnostic(&stdout_path, &stderr_path);
-    Err(program_failure(kind, &program, status, &diagnostic))
-}
-
-fn terminate_process_tree(child: &mut Child) {
-    #[cfg(unix)]
-    if let Ok(process_id) = i32::try_from(child.id()) {
-        let _ = killpg(Pid::from_raw(process_id), Signal::SIGKILL);
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-fn program_failure(
-    kind: ProgramKind,
-    program: &str,
-    status: ExitStatus,
-    diagnostic: &str,
-) -> RenderFailure {
-    let suffix = if diagnostic.trim().is_empty() {
-        String::new()
-    } else {
-        format!(": {}", diagnostic.trim())
-    };
-    RenderFailure::new(
-        kind.failure_kind(),
-        format!("{program} exited with {status}{suffix}"),
-    )
-}
-
-fn program_diagnostic(stdout: &Path, stderr: &Path) -> String {
-    [stderr, stdout]
-        .into_iter()
-        .filter_map(|path| read_limited(path).ok())
-        .find(|content| !content.trim().is_empty())
-        .unwrap_or_default()
-}
-
-fn read_limited(path: &Path) -> std::io::Result<String> {
-    let file = File::open(path)?;
-    let mut bytes = Vec::new();
-    file.take(MAX_DIAGNOSTIC_BYTES).read_to_end(&mut bytes)?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
-}
-
-fn latex_document(source: &str) -> String {
-    let body = if source_is_display_environment(source) {
-        source.to_owned()
-    } else {
-        format!("\\[\n{source}\n\\]")
-    };
-    format!(
-        "\\documentclass[12pt]{{article}}\n\
-         \\usepackage{{amsmath,amssymb,mathtools}}\n\
-         \\pagestyle{{empty}}\n\
-         \\setlength{{\\parindent}}{{0pt}}\n\
-         \\begin{{document}}\n\
-         \\thispagestyle{{empty}}\n\
-         {body}\n\
-         \\end{{document}}\n"
-    )
-}
-
-fn source_is_display_environment(source: &str) -> bool {
-    let Some(environment) = source
-        .trim_start()
-        .strip_prefix(r"\begin{")
-        .and_then(|remaining| remaining.split_once('}'))
-        .map(|(environment, _)| environment)
-    else {
-        return false;
-    };
-    matches!(
-        environment,
-        "align"
-            | "align*"
-            | "alignat"
-            | "alignat*"
-            | "displaymath"
-            | "equation"
-            | "equation*"
-            | "flalign"
-            | "flalign*"
-            | "gather"
-            | "gather*"
-            | "multline"
-            | "multline*"
-    )
 }
 
 fn postprocess(
@@ -878,7 +608,7 @@ fn checked_pixels(width: u32, height: u32, limits: &Limits) -> Result<(), Render
 mod tests {
     use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 
-    use super::{fit_dimensions, postprocess, source_is_display_environment, validate_source};
+    use super::{fit_dimensions, postprocess, validate_source};
     use crate::{
         Antialiasing, ColorScheme, Limits, PixelPadding, PixelSize, RenderFailureKind, Rgb,
     };
@@ -896,16 +626,6 @@ mod tests {
             let failure = validate_source(source, &limits).unwrap_err();
             assert_eq!(failure.kind(), RenderFailureKind::UnsafeSource);
         }
-    }
-
-    #[test]
-    fn display_environments_are_not_double_wrapped() {
-        assert!(source_is_display_environment(
-            r"\begin{align*}a&=b\end{align*}"
-        ));
-        assert!(!source_is_display_environment(
-            r"\begin{pmatrix}a&b\end{pmatrix}"
-        ));
     }
 
     #[test]

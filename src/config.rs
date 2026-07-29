@@ -1,4 +1,4 @@
-use std::{env, ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
+use std::{env, path::PathBuf, sync::Arc};
 
 use directories::BaseDirs;
 
@@ -93,7 +93,7 @@ impl TerminalProfile {
     /// Call this after entering the alternate screen and before starting a
     /// competing terminal-input reader.
     #[cfg(feature = "terminal-probe")]
-    pub fn query(timeout: Duration) -> Self {
+    pub fn query(timeout: std::time::Duration) -> Self {
         use ratatui_image::picker::{Picker, ProtocolType, cap_parser::QueryStdioOptions};
 
         let options = QueryStdioOptions {
@@ -175,7 +175,7 @@ impl Default for PixelPadding {
 pub struct Limits {
     /// Maximum accepted TeX source bytes.
     pub max_source_bytes: usize,
-    /// Maximum intermediate PNG bytes accepted from either renderer.
+    /// Maximum intermediate PNG bytes accepted from the renderer.
     pub max_png_bytes: usize,
     /// Maximum decoded pixels.
     pub max_image_pixels: u64,
@@ -193,8 +193,6 @@ pub struct Limits {
     pub request_queue: usize,
     /// Number of independent render workers.
     pub workers: usize,
-    /// Deadline for each external program.
-    pub program_timeout: Duration,
 }
 
 impl Default for Limits {
@@ -210,7 +208,6 @@ impl Default for Limits {
             max_disk_entries: 256,
             request_queue: 32,
             workers: 2,
-            program_timeout: Duration::from_secs(5),
         }
     }
 }
@@ -225,10 +222,6 @@ pub(crate) struct EngineConfig {
     pub padding: PixelPadding,
     pub dpi: u16,
     pub cache_dir: PathBuf,
-    pub latex: OsString,
-    pub dvipng: OsString,
-    pub latex_available: bool,
-    pub dvipng_available: bool,
     pub limits: Limits,
     pub wake: Wake,
 }

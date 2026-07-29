@@ -1,0 +1,6 @@
+/target
+*.dvi
+*.aux
+*.log
+*.png
+*.tex
